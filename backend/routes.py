@@ -40,6 +40,7 @@ def status():
         "loaded": s["ready"],
         "dataset": s["dataset"],
         "error": s["error"],
+        "message": s.get("message", ""),
     }
 
 

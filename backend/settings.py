@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     cache_disk_enabled: bool = True
     cache_cleanup_interval: int = 300
 
+    dataset_cache_dir: str = "~/.cache/kumodemo/datasets"
+
     cors_origins: str = "*"
 
     rate_limit_enabled: bool = True

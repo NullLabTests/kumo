@@ -25,6 +25,7 @@ _load_status: dict[str, Any] = {
     "ready": False,
     "dataset": "",
     "error": "",
+    "message": "",
     "api_key_configured": bool(settings.kumo_api_key),
 }
 
@@ -75,6 +76,10 @@ def _init_api() -> None:
         log.warning("rfm.init may already be initialized: %s", exc)
 
 
+def _loading_progress(msg: str) -> None:
+    _set_load_status(message=msg)
+
+
 def load_dataset(dataset: str) -> dict:
     from datasets import DatasetNotFound as _DSNotFound
 
@@ -83,13 +88,15 @@ def load_dataset(dataset: str) -> dict:
         raise _DSNotFound(f"Unknown dataset: {dataset}")
 
     log.info("Loading dataset: %s from %s", dataset, spec.root)
+    _loading_progress(f"Loading dataset from S3: {dataset}...")
 
     try:
-        df_dict = load_dataset_data(dataset)
+        df_dict = load_dataset_data(dataset, progress_callback=_loading_progress)
     except Exception as exc:
         log.exception("Failed to load data for %s: %s", dataset, exc)
         raise
 
+    _loading_progress("Building graph and model...")
     try:
         graph = build_graph(dataset, df_dict)
         model = rfm.KumoRFM(graph, verbose=False)
@@ -180,7 +187,7 @@ def _build_graph_info_for_warm(graph: rfm.LocalGraph, raw: dict[str, pd.DataFram
 
 
 def _auto_load() -> None:
-    _set_load_status(ready=False, dataset="", error="")
+    _set_load_status(ready=False, dataset="", error="", message="")
     if not settings.kumo_api_key:
         msg = "No KUMO_API_KEY in .env"
         _set_load_status(error=msg)
@@ -189,7 +196,7 @@ def _auto_load() -> None:
     try:
         _init_api()
         load_dataset(settings.auto_load_dataset)
-        _set_load_status(ready=True, dataset=settings.auto_load_dataset)
+        _set_load_status(ready=True, dataset=settings.auto_load_dataset, message="")
         log.info("Auto-load complete: %s", settings.auto_load_dataset)
     except Exception as exc:
         _set_load_status(error=str(exc))

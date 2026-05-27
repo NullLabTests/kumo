@@ -19,8 +19,21 @@ python3 backend/main.py
 open http://localhost:8080
 ```
 
-The server auto-loads `online_shopping` dataset on startup (~5–10s).  
+The server auto-loads `online_shopping` dataset on startup, then caches locally for near-instant restarts.  
 Full test suite: `cd backend && python3 -m pytest tests/ -v` (112 tests).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="media/dashboard.png" width="400" alt="Dashboard"><br><em>Dashboard — dataset stats & quick actions</em></td>
+    <td align="center"><img src="media/query-lab.png" width="400" alt="Query Lab"><br><em>Query Lab — template grid & PQL editor</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="media/data-explorer.png" width="400" alt="Data Explorer"><br><em>Data Explorer — schema browser & row preview</em></td>
+    <td align="center"><img src="media/query-results.png" width="400" alt="Query Results"><br><em>Prediction results with chart</em></td>
+  </tr>
+</table>
 
 ## Architecture
 
@@ -72,6 +85,7 @@ All settings are configured via environment variables or `backend/.env`:
 | `PREDICT_MAX_ENTITY_IDS` | `1000` | Max entity IDs per request |
 | `PREDICT_MAX_QUERY_LENGTH` | `2000` | Max PQL query length |
 | `DATAFRAME_DOWNCAST` | `true` | Downcast numeric columns on load |
+| `DATASET_CACHE_DIR` | `~/.cache/kumodemo/datasets` | Local cache for S3 datasets (first load slow, subsequent instant) |
 
 ### Backend Modules
 

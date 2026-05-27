@@ -16,14 +16,15 @@ Usage::
 from __future__ import annotations
 
 import gc as _gc
+import os
+import pathlib
 from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
 import pandas as pd
 
-os_data = __import__("os")
-os_data.environ["KUMO_LOG_LEVEL"] = "ERROR"
+os.environ["KUMO_LOG_LEVEL"] = "ERROR"
 from kumoai.experimental.rfm import LocalGraph  # noqa: E402
 
 from exceptions import DatasetNotFound
@@ -194,69 +195,124 @@ def _optimize_memory(df_dict: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame
     return df_dict
 
 
+# ─── Dataset cache ──────────────────────────────────────────────────
+
+
+def _cache_dir(dataset_id: str) -> pathlib.Path:
+    return pathlib.Path(settings.dataset_cache_dir).expanduser() / dataset_id
+
+
+def _cache_path(dataset_id: str, table: str, ext: str) -> pathlib.Path:
+    return _cache_dir(dataset_id) / f"{table}.{ext}"
+
+
+def _is_cached(dataset_id: str, tables: list[str], ext: str) -> bool:
+    return all(_cache_path(dataset_id, t, ext).exists() for t in tables)
+
+
+def _save_to_cache(dataset_id: str, table: str, ext: str, df: pd.DataFrame) -> None:
+    p = _cache_path(dataset_id, table, ext)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if ext == "parquet":
+        df.to_parquet(p)
+    else:
+        df.to_feather(p)
+    log.info("  Cached: %s", p)
+
+
+def _load_from_cache(dataset_id: str, table: str, ext: str) -> pd.DataFrame:
+    p = _cache_path(dataset_id, table, ext)
+    if ext == "parquet":
+        return pd.read_parquet(p)
+    return pd.read_feather(p)
+
+
 # ─── Loaders ────────────────────────────────────────────────────────
 
 
-def _load_parquet(root: str, tables: list[str]) -> dict[str, pd.DataFrame]:
+def _load_parquet(root: str, tables: list[str], dataset_id: str = "", progress_callback: Callable[[str], None] | None = None) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
+    cached = bool(dataset_id) and _is_cached(dataset_id, tables, "parquet")
     for t in tables:
-        path = f"{root}/{t}.parquet"
-        log.info("  Loading parquet: %s", path)
-        result[t] = pd.read_parquet(path)
+        if cached:
+            if progress_callback:
+                progress_callback(f"Loading table `{t}` from cache...")
+            result[t] = _load_from_cache(dataset_id, t, "parquet")
+            log.info("  Loaded from cache: %s", _cache_path(dataset_id, t, "parquet"))
+        else:
+            path = f"{root}/{t}.parquet"
+            log.info("  Loading parquet: %s", path)
+            if progress_callback:
+                progress_callback(f"Downloading table `{t}` from S3 ({len(tables)} total)...")
+            result[t] = pd.read_parquet(path)
+            if dataset_id:
+                _save_to_cache(dataset_id, t, "parquet", result[t])
     return result
 
 
-def _load_csv(root: str, tables: list[str], name_map: dict[str, str] | None = None) -> dict[str, pd.DataFrame]:
+def _load_csv(root: str, tables: list[str], dataset_id: str = "", name_map: dict[str, str] | None = None, progress_callback: Callable[[str], None] | None = None) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
     for t in tables:
         filename = (name_map or {}).get(t, t)
         path = f"{root}/{filename}.csv"
         log.info("  Loading csv: %s", path)
+        if progress_callback:
+            progress_callback(f"Loading table `{t}` from S3 ({len(tables)} total)...")
         result[t] = pd.read_csv(path)
     return result
 
 
-def _load_json(root: str, tables: list[str]) -> dict[str, pd.DataFrame]:
+def _load_json(root: str, tables: list[str], dataset_id: str = "", progress_callback: Callable[[str], None] | None = None) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
     for t in tables:
         path = f"{root}/{t}.json"
         log.info("  Loading json: %s", path)
+        if progress_callback:
+            progress_callback(f"Loading table `{t}` from S3 ({len(tables)} total)...")
         result[t] = pd.read_json(path)
     return result
 
 
-def _load_jsonl(root: str, tables: list[str]) -> dict[str, pd.DataFrame]:
+def _load_jsonl(root: str, tables: list[str], dataset_id: str = "", progress_callback: Callable[[str], None] | None = None) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
     for t in tables:
         path = f"{root}/{t}.jsonl"
         log.info("  Loading jsonl: %s", path)
+        if progress_callback:
+            progress_callback(f"Loading table `{t}` from S3 ({len(tables)} total)...")
         result[t] = pd.read_json(path, lines=True)
     return result
 
 
-def _load_excel(root: str, tables: list[str]) -> dict[str, pd.DataFrame]:
+def _load_excel(root: str, tables: list[str], dataset_id: str = "", progress_callback: Callable[[str], None] | None = None) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
     for t in tables:
         path = f"{root}/{t}.xlsx"
         log.info("  Loading excel: %s", path)
+        if progress_callback:
+            progress_callback(f"Loading table `{t}` from S3 ({len(tables)} total)...")
         result[t] = pd.read_excel(path)
     return result
 
 
-def _load_feather(root: str, tables: list[str]) -> dict[str, pd.DataFrame]:
+def _load_feather(root: str, tables: list[str], dataset_id: str = "", progress_callback: Callable[[str], None] | None = None) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
     for t in tables:
         path = f"{root}/{t}.feather"
         log.info("  Loading feather: %s", path)
+        if progress_callback:
+            progress_callback(f"Loading table `{t}` from S3 ({len(tables)} total)...")
         result[t] = pd.read_feather(path)
     return result
 
 
-def _load_pickle(root: str, tables: list[str]) -> dict[str, pd.DataFrame]:
+def _load_pickle(root: str, tables: list[str], dataset_id: str = "", progress_callback: Callable[[str], None] | None = None) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
     for t in tables:
         path = f"{root}/{t}.pkl"
         log.info("  Loading pickle: %s", path)
+        if progress_callback:
+            progress_callback(f"Loading table `{t}` from S3 ({len(tables)} total)...")
         result[t] = pd.read_pickle(path)
     return result
 
@@ -278,7 +334,7 @@ _LOADERS: dict[str, Callable] = {
 }
 
 
-def load_dataset_data(dataset_id: str) -> dict[str, pd.DataFrame]:
+def load_dataset_data(dataset_id: str, progress_callback: Callable[[str], None] | None = None) -> dict[str, pd.DataFrame]:
     """Load raw DataFrames for *dataset_id* from S3.
 
     :raises DatasetNotFound: If *dataset_id* is unknown.
@@ -291,11 +347,12 @@ def load_dataset_data(dataset_id: str) -> dict[str, pd.DataFrame]:
     if loader is None:
         raise DatasetNotFound(f"Unsupported format: {spec.format}")
 
+    loader_kwargs: dict = {"dataset_id": dataset_id}
     if spec.format == "csv":
-        name_map = _CSV_NAME_MAP.get(dataset_id)
-        df_dict = loader(spec.root, spec.tables, name_map=name_map)
-    else:
-        df_dict = loader(spec.root, spec.tables)
+        loader_kwargs["name_map"] = _CSV_NAME_MAP.get(dataset_id)
+    if progress_callback:
+        loader_kwargs["progress_callback"] = progress_callback
+    df_dict = loader(spec.root, spec.tables, **loader_kwargs)
 
     if spec.column_fixes:
         spec.column_fixes(df_dict)
